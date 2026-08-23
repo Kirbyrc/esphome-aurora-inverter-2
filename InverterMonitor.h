@@ -56,7 +56,7 @@ private:
   bool reset_attempted = false;  // only try one serial reset per outage -- avoids
                                   // reset-spamming for hours when the inverter is
                                   // simply powered down overnight (not a lockup)
-  static const uint8_t LOCKUP_THRESHOLD = 10;  // ~50s of unbroken failures at the 5s poll interval
+  static const uint8_t LOCKUP_THRESHOLD = 10;  // ~150s of unbroken failures at the 15s poll interval
 
 public:
   InverterMonitor(InverterMonitor &other) = delete;
@@ -168,35 +168,69 @@ public:
       }
       turn_led_on();
 
+      // A real delay() (not just yield()) between each publish gives the
+      // WiFi/network stack's background task actual processing time to
+      // drain the API's outgoing send queue, instead of every publish_state()
+      // in this whole pass getting batched into one send when update()
+      // finally returns to the main loop.
       publish_dsp_value(V_IN_1, v_in_1);
+      delay(5);
       publish_dsp_value(V_IN_2, v_in_2);
+      delay(5);
       publish_dsp_value(I_IN_1, i_in_1);
+      delay(5);
       publish_dsp_value(I_IN_2, i_in_2);
+      delay(5);
       publish_dsp_value(POWER_IN_1, power_in_1);
+      delay(5);
       publish_dsp_value(POWER_IN_2, power_in_2);
+      delay(5);
       power_in_total->publish_state(power_in_1->get_state() + power_in_2->get_state());
+      delay(5);
       publish_dsp_value(POWER_PEAK_TODAY, power_peak_today);
+      delay(5);
       publish_dsp_value(POWER_PEAK, power_peak_max);
+      delay(5);
       publish_dsp_value(TEMPERATURE_INVERTER, temperature_inverter);
+      delay(5);
       publish_dsp_value(TEMPERATURE_BOOSTER, temperature_booster);
+      delay(5);
       publish_cumulated_energy(CURRENT_DAY, cumulated_energy_today);
+      delay(5);
       publish_cumulated_energy(CURRENT_WEEK, cumulated_energy_week);
+      delay(5);
       publish_cumulated_energy(CURRENT_MONTH, cumulated_energy_month);
+      delay(5);
       publish_cumulated_energy(CURRENT_YEAR, cumulated_energy_year);
+      delay(5);
       publish_cumulated_energy(TOTAL, cumulated_energy_total);
+      delay(5);
       publish_dsp_value(GRID_VOLTAGE, grid_voltage);
+      delay(5);
       publish_dsp_value(GRID_CURRENT, grid_current);
+      delay(5);
       publish_dsp_value(GRID_POWER, grid_power);
+      delay(5);
       publish_dsp_value(FREQUENCY, frequency);
+      delay(5);
       publish_dsp_value(V_BULK, v_bulk);
+      delay(5);
       publish_dsp_value(I_LEAK_DC_DC, i_leak_dc_dc);
+      delay(5);
       publish_dsp_value(I_LEAK_INVERTER, i_leak_inverter);
+      delay(5);
       publish_dsp_value(DC_DC_GRID_VOLTAGE, dc_dc_grid_voltage);
+      delay(5);
       publish_dsp_value(DC_DC_GRID_FREQUENCY, dc_dc_grid_frequency);
+      delay(5);
       publish_dsp_value(ISOLATION_RESISTANCE, isolation_resistance);
+      delay(5);
       publish_dsp_value(DC_DC_V_BULK, dc_dc_v_bulk);
+      delay(5);
       publish_dsp_value(AVERAGE_GRID_VOLTAGE, average_grid_voltage);
+      delay(5);
       publish_dsp_value(V_BULK_MID, v_bulk_mid);
+      delay(5);
       publish_dsp_value(GRID_VOLTAGE_NEUTRAL, grid_voltage_neutral);
 
       turn_led_off();

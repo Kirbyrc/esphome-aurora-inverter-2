@@ -46,8 +46,11 @@ void ABBAurora::setup(HardwareSerial &hardwareSerial, byte RXGpioPin, byte TXGpi
 void ABBAurora::reset_serial()
 {
     ESP_LOGW(TAG, "Resetting UART after a run of consecutive read failures (possible driver lockup)");
+    ESP_LOGW(TAG, "reset_serial: calling serial->end()");
     serial->end();
+    ESP_LOGW(TAG, "reset_serial: end() returned, starting 100ms delay");
     delay(100);
+    ESP_LOGW(TAG, "reset_serial: delay done, calling serial->begin()");
 #if defined(USE_ESP32)
     serial->begin(19200, SERIAL_8N1, RXPin, TXPin, false, 500);
 #elif defined(USE_ESP8266)
@@ -56,7 +59,9 @@ void ABBAurora::reset_serial()
         serial->swap();
     }
 #endif
+    ESP_LOGW(TAG, "reset_serial: begin() returned, setting timeout");
     serial->setTimeout(100);
+    ESP_LOGW(TAG, "reset_serial: complete");
 }
 
 void ABBAurora::clearData(byte *data, byte len)
