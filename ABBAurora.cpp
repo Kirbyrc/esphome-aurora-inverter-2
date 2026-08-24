@@ -38,8 +38,8 @@ void ABBAurora::setup(HardwareSerial &hardwareSerial, byte RXGpioPin, byte TXGpi
     // Shorten readBytes() timeout from Arduino's 1000ms default so the main
     // loop isn't stalled for tens of seconds per poll cycle by the many
     // unanswered/unsupported DSP queries (each would otherwise cost a full
-    // second). The occasional short, garbage-looking partial reads seen at
-    // both 100ms and 250ms look like RS-485 line noise, not a timing issue.
+    // second). 100ms, 150ms, and 250ms have all been tried; none measurably
+    // reduced the truncated-read rate, so staying at 100ms.
     serial->setTimeout(100);
 }
 
@@ -122,19 +122,38 @@ bool ABBAurora::Send(byte address, byte param0, byte param1, byte param2, byte p
 
     for (int i = 0; i < this->MaxAttempt; i++)
     {
+        // Discard any stale bytes still sitting in the UART RX buffer -- e.g.
+        // the tail end of a previous response that arrived after we'd already
+        // given up waiting on it. serial->flush() only flushes TX, never RX,
+        // so without this, leftover bytes from a prior timed-out read would
+        // become the leading bytes of *this* read, corrupting it.
+        int discarded = 0;
+        while (serial->available()) {
+            serial->read();
+            discarded++;
+        }
+        if (discarded > 0) {
+            ESP_LOGD(TAG, "Send: discarded %d stale byte(s) from RX buffer before transmit", discarded);
+        }
+
+        ESP_LOGD(TAG, "Send: attempt %d/%d -- asserting TX enable", i + 1, this->MaxAttempt);
         digitalWrite(TXPinControl, RS485Transmit);
         delay(40);
 
+        ESP_LOGD(TAG, "Send: calling serial->write()");
         size_t written = serial->write(SendData, sizeof(SendData));
         ESP_LOGD(TAG, "Wrote %u/%u bytes to serial", (unsigned)written, (unsigned)sizeof(SendData));
 
         if (written != 0)
         {
+            ESP_LOGD(TAG, "Send: calling serial->flush()");
             serial->flush();
             SendStatus = true;
 
+            ESP_LOGD(TAG, "Send: flush() returned -- asserting RX enable");
             digitalWrite(TXPinControl, RS485Receive);
 
+            ESP_LOGD(TAG, "Send: calling serial->readBytes() (timeout=%ums)", 100);
             size_t got = serial->readBytes(ReceiveData, sizeof(ReceiveData));
             ESP_LOGD(TAG, "RX: got %u/%u bytes: %02X %02X %02X %02X %02X %02X %02X %02X",
                      (unsigned)got, (unsigned)sizeof(ReceiveData),
