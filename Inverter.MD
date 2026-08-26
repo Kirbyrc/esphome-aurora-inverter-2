@@ -109,6 +109,12 @@ The **Diagnostic** entities (IP address, WiFi strength, uptime, ESPHome version,
 - **`Serial Reset Count` sensor** — a persistent counter (General group) tracking how many times the self-heal reset has fired since boot.
 - **`Reset Reason` sensor** (from `common_interface.yaml`, applies to every device) — reports the ESP32's actual last reset cause (OTA reboot, task watchdog, brownout, power-on, etc.), useful for telling a deliberate reflash apart from a crash.
 
+## Stability
+
+Earlier builds of this integration crashed intermittently (`exception/panic`, `task watchdog` — visible via the shared `Reset Reason` sensor) with no conclusively identified root cause. Several theories were investigated and either ruled out or left unproven: a `reset_serial()` teardown race, and a batch-write-to-a-stale-API-connection theory. Both delay-based and timeout-based tweaks to the RS-485 read path were tried and measured to have no effect on read reliability (see Known Limitations) — none of them were ever confirmed to be crash-related either.
+
+The current build — the two-group read split, corrected temperature calculation, RX-buffer drain fix, a defensive null-check on the `inverter` pointer, the `Sensor*`→`float` raw-value refactor, and the boot-time `NAN`/hold-off fix — has run continuously with **zero unexplained reboots for ~43 hours** as of 2026-08-26 (every reboot in the full capture log traces to a deliberate OTA flash or a manual restart-button press). This is an encouraging data point, not confirmation the underlying crash cause is fixed, since it was never conclusively identified — worth continuing to watch rather than treating as resolved.
+
 ## Boot-Time Data Handling
 
 Two related fixes prevent bad or misleading data from reaching Home Assistant in the window right after a boot, before `InverterMonitor` has completed any real reads:
