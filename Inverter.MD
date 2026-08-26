@@ -30,7 +30,7 @@ These pins are owned directly by the Aurora library via raw `Serial2`/`digitalWr
 | `aurora_inverter/ABBAuroraEnums.h` | Protocol constants — DSP value types, cumulated-energy periods, etc. |
 | `aurora_inverter/ABBAuroraStrings.h/.cpp` | Human-readable string tables for protocol state/error codes. |
 | `aurora_inverter/ABBAurora.h/.cpp` | Low-level Aurora communication protocol: frame building, CRC16, send/receive over the UART, per-command read methods (`ReadState`, `ReadDSPValue`, `ReadCumulatedEnergy`, etc). |
-| `aurora_inverter/InverterMonitor.h` | ESPHome-facing singleton that owns an `ABBAurora` instance, exposes ESPHome `Sensor`/`TextSensor` objects for each telemetry value, and drives polling. |
+| `aurora_inverter/InverterMonitor.h` | ESPHome-facing singleton that owns an `ABBAurora` instance, caches each telemetry field as a plain `float`, and drives polling. |
 
 `InverterMonitor` is a plain C++ singleton (`InverterMonitor::get_instance()`), not a component ESPHome's codegen knows about. Because of that, it is **not** driven through ESPHome's normal component `loop()`/`PollingComponent` scheduling — instead:
 
@@ -38,6 +38,12 @@ These pins are owned directly by the Aurora library via raw `Serial2`/`digitalWr
 - A YAML `interval:` block calls `InverterMonitor::get_instance()->update()` on a real ESPHome-scheduled timer.
 
 (The `PollingComponent` base class and its constructor interval are vestigial — nothing calls `App.register_component_()` on this object, so `PollingComponent`'s own scheduling never actually runs.)
+
+### Raw value storage
+
+The 29 telemetry fields (`v_in_1`, `temperature_inverter`, `cumulated_energy_today`, etc.) are plain `float` members on `InverterMonitor`, not ESPHome `Sensor` objects — the actual, HA-facing entities are the separate `platform: template` sensors defined in `inverter.yaml`, which read these floats directly (e.g. `InverterMonitor::get_instance()->v_in_1`). Earlier these fields *were* raw, unregistered `Sensor*` objects used purely as internal storage; routing every RS-485 read through `Sensor::publish_state()` meant paying for ESPHome's full filter/callback/controller-registry machinery — and its unconditional state-broadcast log line — for values that were never meant to be their own entities, producing constant `'?'`-named noise in the log (unregistered objects have no name). Switching to plain floats removes both costs; the real template sensors are unaffected, since they always ran on their own independent `update_interval`, not through these internal objects.
+
+`connection_status` (`TextSensor*`) and `serial_reset_count` (`Sensor*`) are the two exceptions — kept as real, named ESPHome objects since they publish rarely (only on an actual connection-state change or a self-heal reset, not every cycle) and were never the source of the log noise.
 
 ## Polling & Reporting Intervals
 
@@ -62,7 +68,7 @@ Walking through one full 15-second `update()` cycle, from the `interval:` trigge
    - Fails → the cycle ends immediately; no sensor data is read this pass. `consecutive_failures` increments; after 10 in a row (~2.5 min), the self-heal `reset_serial()` fires once per outage.
    - Succeeds → `consecutive_failures` resets to 0 and the cycle proceeds to read one group of sensors.
 
-3. **One group of sensors is read** — not all ~29 at once. Two fixed groups (`group_a_`, `group_b_`) alternate each *successful* cycle (the toggle only advances on success), so a full refresh of any given sensor takes two successful cycles — nominally 30s, matching Home Assistant's own reporting interval. Each entry is read and published in turn by `publish_entry()`, with a `delay(5)` + `yield()` afterward so the WiFi/API stack gets a chance to drain outgoing sensor updates between reads instead of batching the whole group into one burst.
+3. **One group of sensors is read** — not all ~29 at once. Two fixed groups (`group_a_`, `group_b_`) alternate each *successful* cycle (the toggle only advances on success), so a full refresh of any given sensor takes two successful cycles — nominally 30s, matching Home Assistant's own reporting interval. Each entry is read and stored in turn by `publish_entry()` (into the raw `float` cache, not an ESPHome `Sensor` — see Raw value storage above), with a `delay(5)` + `yield()` afterward so the WiFi/API stack gets a chance to drain other outgoing traffic between reads.
 
 4. **Each individual sensor read is its own request/response transaction**, one of two shapes depending on the field:
    - **DSP value fields** (voltages, currents, power, temperatures, frequency, etc.): Esphome sends the Inverter a 10-byte request: address, command byte **59** ("Read DSP Value"), the specific value-type code for that field (e.g. `23` for `V_IN_1`, `21` for `TEMPERATURE_INVERTER`), a "global" parameter byte (`0` = per-module measurement — the only mode this code uses), three more zero-filled bytes, and a 2-byte CRC16. The Inverter responds with an 8-byte frame: transmission state, global state, a 4-byte IEEE-754 float carrying the requested value (sent most-significant-byte-first; Esphome reassembles it by reversing the byte order into a `float`), and a 2-byte CRC16.
@@ -103,6 +109,15 @@ The **Diagnostic** entities (IP address, WiFi strength, uptime, ESPHome version,
 - **`Serial Reset Count` sensor** — a persistent counter (General group) tracking how many times the self-heal reset has fired since boot.
 - **`Reset Reason` sensor** (from `common_interface.yaml`, applies to every device) — reports the ESP32's actual last reset cause (OTA reboot, task watchdog, brownout, power-on, etc.), useful for telling a deliberate reflash apart from a crash.
 
+## Boot-Time Data Handling
+
+Two related fixes prevent bad or misleading data from reaching Home Assistant in the window right after a boot, before `InverterMonitor` has completed any real reads:
+
+- **`NAN` defaults.** Each raw `float` field defaults to `NAN`, not `0`. If a template sensor's lambda evaluates before that field has ever been successfully read, it returns `NAN` rather than a fabricated zero — `TemplateSensor::update()` still calls `publish_state(NAN)` in that case, but Home Assistant's ESPHome integration treats a NaN sensor value as "unknown," not a real `0 V`/`0 W` reading.
+- **A 1-minute publish hold-off.** Each of the 28 raw-telemetry lambdas also checks `InverterMonitor::get_instance()->still_booting()` (`millis() < BOOT_SETTLE_MS`, currently 60000) first, and returns `{}` (skip this update) until a minute has passed since boot. Unlike a `NAN` publish, returning `{}` means `publish_state()` is never called at all, so ESPHome reports `missing_state: true` over the API — the more explicit and unambiguous "no data yet" signal, guaranteed regardless of how Home Assistant happens to handle a raw `NaN` float. This is deliberately a stronger guarantee than the `NAN` default alone provides, at the cost of holding back up to a minute of otherwise-legitimate early readings.
+
+`connection_status` and `serial_reset_count` are not gated by either mechanism — their boot-time values (`DISCONNECTED`, `0`) are accurate statements of reality at boot, not placeholder data.
+
 ## Debug Logging
 
 Per-read timing and low-level protocol tracing exist but are dormant by default (`logger.level: INFO` in `inverter.yaml`). To re-enable:
@@ -111,9 +126,11 @@ Per-read timing and low-level protocol tracing exist but are dormant by default 
 logger:
   level: DEBUG
   logs:
-    INVERTER_MONITOR: DEBUG   # per-read timing: "ReadDSPValue 5 411.86 (62 ms)"
+    INVERTER_MONITOR: DEBUG   # per-read timing: "read type=5 (62 ms), storing value=411.86"
     ABB_AURORA: DEBUG         # raw TX/RX bytes and CRC check results
 ```
+
+Note: enabling this adds real per-call overhead (string formatting + network log transmission across ~14-15 reads per cycle) and was observed to be enough, on its own, to occasionally push `update()` past its "interval took a long time" warning threshold — that warning's absence isn't necessarily evidence of a fix elsewhere; check whether debug logging is active before drawing conclusions from it.
 
 `WARNING`-level messages (lockup detection/reset) always show regardless of this setting.
 

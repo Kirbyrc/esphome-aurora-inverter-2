@@ -1,5 +1,6 @@
 #include "esphome.h"
 #include <ABBAurora.h>
+#include <cmath>
 
 using namespace esphome;
 using namespace text_sensor;
@@ -48,7 +49,9 @@ struct SensorEntry
 {
   ReadKind kind;
   uint8_t type_code;  // DSP_VALUE_TYPE or CUMULATED_ENERGY_TYPE, depending on kind
-  Sensor *sensor;
+  float *value;  // internal raw-value storage -- not an ESPHome Sensor, so storing
+                  // into it doesn't log or hit the API; the real, HA-facing template
+                  // sensors in inverter.yaml read this directly via their lambda.
 };
 
 class InverterMonitor : public PollingComponent
@@ -73,76 +76,91 @@ public:
   void operator=(const InverterMonitor &) = delete;
   static InverterMonitor *get_instance();
 
+  // Holds HA-facing sensor publishes off for a settling window after boot --
+  // otherwise the first lambda evaluations (on their own 30s schedule) could
+  // fire before InverterMonitor has completed even one successful read.
+  static constexpr uint32_t BOOT_SETTLE_MS = 60000;
+  bool still_booting() { return millis() < BOOT_SETTLE_MS; }
+
   TextSensor *connection_status = new TextSensor();
   Sensor *serial_reset_count = new Sensor();
-  Sensor *v_in_1 = new Sensor();
-  Sensor *v_in_2 = new Sensor();
-  Sensor *i_in_1 = new Sensor();
-  Sensor *i_in_2 = new Sensor();
-  Sensor *power_in_1 = new Sensor();
-  Sensor *power_in_2 = new Sensor();
-  Sensor *power_in_total = new Sensor();
-  Sensor *power_peak_today = new Sensor();
-  Sensor *power_peak_max = new Sensor();
-  Sensor *temperature_inverter = new Sensor();
-  Sensor *temperature_booster = new Sensor();
-  Sensor *cumulated_energy_today = new Sensor();
-  Sensor *cumulated_energy_week = new Sensor();
-  Sensor *cumulated_energy_month = new Sensor();
-  Sensor *cumulated_energy_year = new Sensor();
-  Sensor *cumulated_energy_total = new Sensor();
-  Sensor *grid_voltage = new Sensor();
-  Sensor *grid_current = new Sensor();
-  Sensor *grid_power = new Sensor();
-  Sensor *frequency = new Sensor();
-  Sensor *v_bulk = new Sensor();
-  Sensor *i_leak_dc_dc = new Sensor();
-  Sensor *i_leak_inverter = new Sensor();
-  Sensor *dc_dc_grid_voltage = new Sensor();
-  Sensor *dc_dc_grid_frequency = new Sensor();
-  Sensor *isolation_resistance = new Sensor();
-  Sensor *dc_dc_v_bulk = new Sensor();
-  Sensor *average_grid_voltage = new Sensor();
-  Sensor *v_bulk_mid = new Sensor();
-  Sensor *grid_voltage_neutral = new Sensor();
+
+  // Raw value cache for each telemetry field -- plain floats, not ESPHome
+  // Sensor objects. These are never registered with ESPHome and never
+  // published themselves; the real, HA-facing template sensors in
+  // inverter.yaml read them directly (e.g. "->v_in_1" instead of
+  // "->v_in_1->state"). Avoids routing every RS-485 read through the full
+  // Sensor::publish_state() machinery (filters, callbacks, controller
+  // registry, and its unconditional log line) for values that were never
+  // meant to be their own entities.
+  float v_in_1 = NAN;
+  float v_in_2 = NAN;
+  float i_in_1 = NAN;
+  float i_in_2 = NAN;
+  float power_in_1 = NAN;
+  float power_in_2 = NAN;
+  float power_in_total = NAN;
+  float power_peak_today = NAN;
+  float power_peak_max = NAN;
+  float temperature_inverter = NAN;
+  float temperature_booster = NAN;
+  float cumulated_energy_today = NAN;
+  float cumulated_energy_week = NAN;
+  float cumulated_energy_month = NAN;
+  float cumulated_energy_year = NAN;
+  float cumulated_energy_total = NAN;
+  float grid_voltage = NAN;
+  float grid_current = NAN;
+  float grid_power = NAN;
+  float frequency = NAN;
+  float v_bulk = NAN;
+  float i_leak_dc_dc = NAN;
+  float i_leak_inverter = NAN;
+  float dc_dc_grid_voltage = NAN;
+  float dc_dc_grid_frequency = NAN;
+  float isolation_resistance = NAN;
+  float dc_dc_v_bulk = NAN;
+  float average_grid_voltage = NAN;
+  float v_bulk_mid = NAN;
+  float grid_voltage_neutral = NAN;
 
   // Split across two groups so a full refresh takes two 15s cycles (30s --
   // matching Home Assistant's own reporting interval) instead of reading and
   // publishing all ~29 sensors in one pass. Halves per-cycle RS-485 traffic
   // and publish-burst size.
   const SensorEntry group_a_[15] = {
-    {ReadKind::DSP_RAW, (uint8_t)V_IN_1, v_in_1},
-    {ReadKind::DSP_RAW, (uint8_t)V_IN_2, v_in_2},
-    {ReadKind::DSP_RAW, (uint8_t)I_IN_1, i_in_1},
-    {ReadKind::DSP_RAW, (uint8_t)I_IN_2, i_in_2},
-    {ReadKind::DSP_RAW, (uint8_t)POWER_IN_1, power_in_1},
-    {ReadKind::DSP_RAW, (uint8_t)POWER_IN_2, power_in_2},
-    {ReadKind::DSP_RAW, (uint8_t)POWER_PEAK_TODAY, power_peak_today},
-    {ReadKind::DSP_RAW, (uint8_t)POWER_PEAK, power_peak_max},
-    {ReadKind::DSP_RAW, (uint8_t)TEMPERATURE_INVERTER, temperature_inverter},
-    {ReadKind::DSP_RAW, (uint8_t)TEMPERATURE_BOOSTER, temperature_booster},
-    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_DAY, cumulated_energy_today},
-    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_WEEK, cumulated_energy_week},
-    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_MONTH, cumulated_energy_month},
-    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_YEAR, cumulated_energy_year},
-    {ReadKind::CUMULATED_ENERGY, (uint8_t)TOTAL, cumulated_energy_total},
+    {ReadKind::DSP_RAW, (uint8_t)V_IN_1, &v_in_1},
+    {ReadKind::DSP_RAW, (uint8_t)V_IN_2, &v_in_2},
+    {ReadKind::DSP_RAW, (uint8_t)I_IN_1, &i_in_1},
+    {ReadKind::DSP_RAW, (uint8_t)I_IN_2, &i_in_2},
+    {ReadKind::DSP_RAW, (uint8_t)POWER_IN_1, &power_in_1},
+    {ReadKind::DSP_RAW, (uint8_t)POWER_IN_2, &power_in_2},
+    {ReadKind::DSP_RAW, (uint8_t)POWER_PEAK_TODAY, &power_peak_today},
+    {ReadKind::DSP_RAW, (uint8_t)POWER_PEAK, &power_peak_max},
+    {ReadKind::DSP_RAW, (uint8_t)TEMPERATURE_INVERTER, &temperature_inverter},
+    {ReadKind::DSP_RAW, (uint8_t)TEMPERATURE_BOOSTER, &temperature_booster},
+    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_DAY, &cumulated_energy_today},
+    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_WEEK, &cumulated_energy_week},
+    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_MONTH, &cumulated_energy_month},
+    {ReadKind::CUMULATED_ENERGY, (uint8_t)CURRENT_YEAR, &cumulated_energy_year},
+    {ReadKind::CUMULATED_ENERGY, (uint8_t)TOTAL, &cumulated_energy_total},
   };
 
   const SensorEntry group_b_[14] = {
-    {ReadKind::DSP_RAW, (uint8_t)GRID_VOLTAGE, grid_voltage},
-    {ReadKind::DSP_RAW, (uint8_t)GRID_CURRENT, grid_current},
-    {ReadKind::DSP_RAW, (uint8_t)GRID_POWER, grid_power},
-    {ReadKind::DSP_RAW, (uint8_t)FREQUENCY, frequency},
-    {ReadKind::DSP_RAW, (uint8_t)V_BULK, v_bulk},
-    {ReadKind::DSP_RAW, (uint8_t)I_LEAK_DC_DC, i_leak_dc_dc},
-    {ReadKind::DSP_RAW, (uint8_t)I_LEAK_INVERTER, i_leak_inverter},
-    {ReadKind::DSP_RAW, (uint8_t)DC_DC_GRID_VOLTAGE, dc_dc_grid_voltage},
-    {ReadKind::DSP_RAW, (uint8_t)DC_DC_GRID_FREQUENCY, dc_dc_grid_frequency},
-    {ReadKind::DSP_RAW, (uint8_t)ISOLATION_RESISTANCE, isolation_resistance},
-    {ReadKind::DSP_RAW, (uint8_t)DC_DC_V_BULK, dc_dc_v_bulk},
-    {ReadKind::DSP_RAW, (uint8_t)AVERAGE_GRID_VOLTAGE, average_grid_voltage},
-    {ReadKind::DSP_RAW, (uint8_t)V_BULK_MID, v_bulk_mid},
-    {ReadKind::DSP_RAW, (uint8_t)GRID_VOLTAGE_NEUTRAL, grid_voltage_neutral},
+    {ReadKind::DSP_RAW, (uint8_t)GRID_VOLTAGE, &grid_voltage},
+    {ReadKind::DSP_RAW, (uint8_t)GRID_CURRENT, &grid_current},
+    {ReadKind::DSP_RAW, (uint8_t)GRID_POWER, &grid_power},
+    {ReadKind::DSP_RAW, (uint8_t)FREQUENCY, &frequency},
+    {ReadKind::DSP_RAW, (uint8_t)V_BULK, &v_bulk},
+    {ReadKind::DSP_RAW, (uint8_t)I_LEAK_DC_DC, &i_leak_dc_dc},
+    {ReadKind::DSP_RAW, (uint8_t)I_LEAK_INVERTER, &i_leak_inverter},
+    {ReadKind::DSP_RAW, (uint8_t)DC_DC_GRID_VOLTAGE, &dc_dc_grid_voltage},
+    {ReadKind::DSP_RAW, (uint8_t)DC_DC_GRID_FREQUENCY, &dc_dc_grid_frequency},
+    {ReadKind::DSP_RAW, (uint8_t)ISOLATION_RESISTANCE, &isolation_resistance},
+    {ReadKind::DSP_RAW, (uint8_t)DC_DC_V_BULK, &dc_dc_v_bulk},
+    {ReadKind::DSP_RAW, (uint8_t)AVERAGE_GRID_VOLTAGE, &average_grid_voltage},
+    {ReadKind::DSP_RAW, (uint8_t)V_BULK_MID, &v_bulk_mid},
+    {ReadKind::DSP_RAW, (uint8_t)GRID_VOLTAGE_NEUTRAL, &grid_voltage_neutral},
   };
 
   void setup() override
@@ -175,9 +193,8 @@ public:
     }
     uint32_t elapsed = millis() - start;
     if (ok) {
-      ESP_LOGD(TAG, "read type=%d (%u ms), about to publish_state(%f)", entry.type_code, elapsed, value);
-      entry.sensor->publish_state(value);
-      ESP_LOGD(TAG, "publish_entry: publish_state() returned for type=%d", entry.type_code);
+      ESP_LOGD(TAG, "read type=%d (%u ms), storing value=%f", entry.type_code, elapsed, value);
+      *entry.value = value;
     } else {
       ESP_LOGD(TAG, "read type=%d failed (%u ms)", entry.type_code, elapsed);
     }
@@ -222,8 +239,8 @@ public:
         ESP_LOGD(TAG, "update: group entry %u/%u", (unsigned)(i + 1), (unsigned)count);
         publish_entry(group[i]);
       }
-      ESP_LOGD(TAG, "update: group loop done, publishing power_in_total");
-      power_in_total->publish_state(power_in_1->get_state() + power_in_2->get_state());
+      ESP_LOGD(TAG, "update: group loop done, storing power_in_total");
+      power_in_total = power_in_1 + power_in_2;
       group_toggle_ = !group_toggle_;
 
       turn_led_off();
