@@ -63,7 +63,7 @@ At night the inverter powers itself down, so `DISCONNECTED` with no readings is 
 
 ## Credit
 
-The RS-485/Aurora protocol library (`aurora_inverter/ABBAurora.*`, `aurora_inverter/ABBAuroraStrings.*`, `aurora_inverter/ABBAuroraEnums.h`) was leveraged from [michelsciortino/esphome-aurora-inverter](https://github.com/michelsciortino/esphome-aurora-inverter).
+The RS-485/Aurora protocol library (`ABBAurora.*`, `ABBAuroraStrings.*`, `ABBAuroraEnums.h`) was leveraged from [michelsciortino/esphome-aurora-inverter](https://github.com/michelsciortino/esphome-aurora-inverter), and `InverterMonitor.h` was adapted from the same project.
 
 ## Hardware
 
@@ -100,10 +100,10 @@ Basement installation:
 
 | File | Purpose |
 |---|---|
-| `aurora_inverter/ABBAuroraEnums.h` | Protocol constants — DSP value types, cumulated-energy periods, etc. |
-| `aurora_inverter/ABBAuroraStrings.h/.cpp` | Human-readable string tables for protocol state/error codes. |
-| `aurora_inverter/ABBAurora.h/.cpp` | Low-level Aurora communication protocol: frame building, CRC16, send/receive over the UART, per-command read methods (`ReadState`, `ReadDSPValue`, `ReadCumulatedEnergy`, etc). |
-| `aurora_inverter/InverterMonitor.h` | ESPHome-facing singleton that owns an `ABBAurora` instance, caches each telemetry field as a plain `float`, and drives polling. |
+| `ABBAuroraEnums.h` | Protocol constants — DSP value types, cumulated-energy periods, etc. |
+| `ABBAuroraStrings.h/.cpp` | Human-readable string tables for protocol state/error codes. |
+| `ABBAurora.h/.cpp` | Low-level Aurora communication protocol: frame building, CRC16, send/receive over the UART, per-command read methods (`ReadState`, `ReadDSPValue`, `ReadCumulatedEnergy`, etc). |
+| `InverterMonitor.h` | ESPHome-facing singleton that owns an `ABBAurora` instance, caches each telemetry field as a plain `float`, and drives polling. |
 
 `InverterMonitor` is a plain C++ singleton (`InverterMonitor::get_instance()`), not a component ESPHome's codegen knows about. Because of that, it is **not** driven through ESPHome's normal component `loop()`/`PollingComponent` scheduling — instead:
 
@@ -123,7 +123,7 @@ The 29 telemetry fields (`v_in_1`, `temperature_inverter`, `cumulated_energy_tod
 - **RS-485 poll (device ↔ inverter):** every 15 seconds — the `interval:` block in `inverter.yaml`.
 - **Sensor reporting (device → Home Assistant):** every 30 seconds — the `&default_sensor` anchor used by every sensor's `update_interval`.
 
-Each `update()` cycle does one `ReadState()` call, and — if that succeeds — roughly 30 further `ReadDSPValue`/`ReadCumulatedEnergy` calls, one per telemetry field.
+Each `update()` cycle does one `ReadState()` call, and — if that succeeds — reads one of two sensor groups: 15 `ReadDSPValue`/`ReadCumulatedEnergy` calls for group A or 14 for group B, one per telemetry field. Every field is therefore refreshed once per two successful cycles (see Serial Communication Protocol below).
 
 ## Serial Communication Protocol
 
@@ -163,7 +163,7 @@ Walking through one full 15-second `update()` cycle, from the `interval:` trigge
 **Measured timing:**
 - Successful 8/8-byte reads: ~21ms average, up to ~80ms.
 - Truncated reads: ~100ms average — i.e. they run out the full per-byte timeout rather than failing fast. The response is consistently a clean prefix of real bytes followed by silence (never scattered mid-frame corruption), which points at the loss happening at the tail end of the *inverter's own* transmission (driver-disable timing or EMI from its switching electronics) rather than anything fixable from this side of the link — see Known Limitations.
-- Gap between one field's read finishing and the next field's transaction starting (within the same group loop): GPIO21 flips back to `HIGH` (TX-enable) ~28ms after `readBytes()` returns — that covers returning up through `ReadDSPValue`/`ReadCumulatedEnergy` into `publish_entry()`, the log/CRC-check lines, `sensor->publish_state()`, the explicit `delay(5)`, and `yield()`. Esphome doesn't actually start writing the next request's bytes on the wire until ~72ms after `readBytes()` returns, once the `delay(40)` TX-settle has also elapsed. This gap doesn't apply after the *last* entry in a group — nothing transmits again until the next scheduled `update()` cycle, 15 seconds later.
+- Gap between one field's read finishing and the next field's transaction starting (within the same group loop): GPIO21 flips back to `HIGH` (TX-enable) ~28ms after `readBytes()` returns — that covers returning up through `ReadDSPValue`/`ReadCumulatedEnergy` into `publish_entry()`, the log/CRC-check lines, storing the value in its `float` field, the explicit `delay(5)`, and `yield()`. (These timings were measured before the switch from `Sensor` objects to plain floats, when this step also called `publish_state()`, so the gap is now likely somewhat shorter.) Esphome doesn't actually start writing the next request's bytes on the wire until ~72ms after `readBytes()` returns, once the `delay(40)` TX-settle has also elapsed. This gap doesn't apply after the *last* entry in a group — nothing transmits again until the next scheduled `update()` cycle, 15 seconds later.
 
 ## Web UI Sensor Groups
 
