@@ -4,7 +4,7 @@ ESPHome integration that monitors an ABB/Power-One Aurora **PVI-5000-6000-OUTD-U
 
 Config package: [`inverter.yaml`](inverter.yaml)
 Library code: [`aurora_inverter/`](.)
-Repository: [github.com/Kirbyrc/esphome](https://github.com/Kirbyrc/esphome)
+Repository: [github.com/Kirbyrc/esphome-aurora-inverter-2](https://github.com/Kirbyrc/esphome-aurora-inverter-2)
 
 ## Usage
 
