@@ -1,8 +1,6 @@
-/.esphome/
-**/.pioenvs/
-**/.piolibdeps/
-**/lib/
-**/src/
-**/platformio.ini
-/secrets.yaml
-/inverter/**
+# Never commit real credentials (use secrets.yaml.example as the template)
+secrets.yaml
+# Editor/OS clutter
+.DS_Store
+.vscode/
+__pycache__/
