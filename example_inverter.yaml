@@ -1,0 +1,47 @@
+# Example top-level device config for the Aurora inverter monitor.
+#
+# Copy this file into your ESPHome config directory (next to the
+# aurora_inverter/ folder, not inside it), rename it (e.g. inverter.yaml),
+# and add the secrets listed in secrets.yaml.example to your secrets.yaml.
+# The ESPHome dashboard only lists YAML files in the top level of the
+# config directory.
+
+substitutions:
+  friendly_name: Inverter
+
+esphome:
+  name: inverter
+  friendly_name: $friendly_name
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Fallback hotspot if the device can't join your WiFi.
+  ap:
+    ssid: $friendly_name Hotspot
+    password: !secret recovery_password
+
+captive_portal:
+
+# Home Assistant connection.
+api:
+  encryption:
+    key: !secret ha_encryption_key
+
+# OTA uploads are encrypted and authenticated with the api key above.
+ota:
+  - platform: esphome
+    encryption: {}
+
+# The package enables the web server and its sorting groups; this adds a
+# login to it. ota: false keeps unencrypted firmware uploads off the web page
+# (the captive portal's fallback hotspot still offers one for recovery).
+web_server:
+  ota: false
+  auth:
+    type: digest
+    username: !secret web_server_username
+    password: !secret web_server_password
+
+packages:
+  inverter: !include aurora_inverter/inverter.yaml

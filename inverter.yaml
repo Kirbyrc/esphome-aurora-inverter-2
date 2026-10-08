@@ -1,0 +1,505 @@
+# Aurora inverter monitor package. Include this from a top-level device
+# config that supplies esphome: name/friendly_name and your own wifi/api/ota
+# settings -- see README.md.
+#
+# The includes: paths are resolved relative to the ESPHome config directory,
+# not this file, so this folder must be named aurora_inverter/ and sit
+# directly in the config directory.
+
+esphome:
+  includes:
+    - aurora_inverter/ABBAuroraStrings.cpp
+    - aurora_inverter/ABBAuroraStrings.h
+    - aurora_inverter/ABBAuroraEnums.h
+    - aurora_inverter/ABBAurora.cpp
+    - aurora_inverter/ABBAurora.h
+    - aurora_inverter/InverterMonitor.h
+  libraries:
+    - "Wire"
+  on_boot:
+    priority: 800.0
+    then:
+      - lambda: |-
+          InverterMonitor::get_instance()->setup();
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: arduino
+
+logger:
+  level: INFO
+
+web_server:
+  version: 3
+  sorting_groups:
+    - id: sg_general
+      name: "General"
+      sorting_weight: 10
+    - id: sg_dc
+      name: "DC"
+      sorting_weight: 20
+    - id: sg_grid
+      name: "Grid"
+      sorting_weight: 30
+
+# NOTE: RS-485 UART (GPIO17/18) and direction control (GPIO21) are owned
+# directly by the Aurora library (see aurora_inverter/InverterMonitor.h RX/TX/
+# TX_CONTROL_GPIO) via raw Serial2/digitalWrite calls, not by ESPHome's
+# uart:/switch: components -- declaring those here would double-claim the
+# same physical pins and fight the library for control of them.
+
+# Drives InverterMonitor::update() on a real ESPHome-scheduled loop.
+# (InverterMonitor is a plain PollingComponent instantiated at runtime, not
+# a codegen-known component, so App never actually calls its loop()/update()
+# on its own -- see chat notes.)
+interval:
+  - interval: 15s
+    then:
+      - lambda: |-
+          InverterMonitor::get_instance()->update();
+
+sensor:
+  - platform: template
+    update_interval: &default_sensor 30s
+    name: "Serial Reset Count"
+    id: serial_reset_count
+    icon: "mdi:restart-alert"
+    accuracy_decimals: 0
+    state_class: total_increasing
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      return InverterMonitor::get_instance()->serial_reset_count->state;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Voltage In 1"
+    id: v_in_1
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:lightning-bolt-outline"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->v_in_1;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Voltage In 2"
+    id: v_in_2
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:lightning-bolt-outline"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->v_in_2;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Current In 1"
+    id: i_in_1
+    unit_of_measurement: A
+    accuracy_decimals: 2
+    icon: "mdi:current-ac"
+    device_class: current
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->i_in_1;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Current In 2"
+    id: i_in_2
+    unit_of_measurement: A
+    accuracy_decimals: 2
+    icon: "mdi:current-ac"
+    device_class: current
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->i_in_2;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Power In 1"
+    id: power_in_1
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    icon: "mdi:solar-power"
+    device_class: power
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->power_in_1;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Power In 2"
+    id: power_in_2
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    icon: "mdi:solar-power"
+    device_class: power
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->power_in_2;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Power In Total"
+    id: power_in_total
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    icon: "mdi:solar-power"
+    device_class: power
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->power_in_total;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Power Peak Today"
+    id: power_peak_today
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    icon: "mdi:solar-power"
+    device_class: power
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->power_peak_today;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Power Peak Max"
+    id: power_peak_max
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    icon: "mdi:solar-power"
+    device_class: power
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->power_peak_max;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Inverter Temp"
+    id: inverter_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    icon: "mdi:thermometer"
+    device_class: temperature
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->temperature_inverter;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Booster Temp"
+    id: booster_temp
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    icon: "mdi:thermometer"
+    device_class: temperature
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->temperature_booster;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Cumulated Energy Today"
+    id: cumulated_energy_today
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    icon: "mdi:car-battery"
+    device_class: energy
+    state_class: total_increasing
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->cumulated_energy_today;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Cumulated Energy Week"
+    id: cumulated_energy_week
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    icon: "mdi:car-battery"
+    device_class: energy
+    state_class: total_increasing
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->cumulated_energy_week;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Cumulated Energy Month"
+    id: cumulated_energy_month
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    icon: "mdi:car-battery"
+    device_class: energy
+    state_class: total_increasing
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->cumulated_energy_month;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Cumulated Energy Year"
+    id: cumulated_energy_year
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    icon: "mdi:car-battery"
+    device_class: energy
+    state_class: total_increasing
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->cumulated_energy_year;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Cumulated Energy Total"
+    id: cumulated_energy_total
+    unit_of_measurement: "Wh"
+    accuracy_decimals: 0
+    icon: "mdi:car-battery"
+    device_class: energy
+    state_class: total_increasing
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->cumulated_energy_total;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Grid Voltage"
+    id: grid_voltage
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_grid
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->grid_voltage;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Grid Current"
+    id: grid_current
+    unit_of_measurement: A
+    accuracy_decimals: 2
+    icon: "mdi:current-ac"
+    device_class: current
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_grid
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->grid_current;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Grid Power"
+    id: grid_power
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    icon: "mdi:flash"
+    device_class: power
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_grid
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->grid_power;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Frequency"
+    id: frequency
+    unit_of_measurement: Hz
+    accuracy_decimals: 2
+    icon: "mdi:sine-wave"
+    device_class: frequency
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_grid
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->frequency;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Bulk Voltage"
+    id: v_bulk
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->v_bulk;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "DC-DC Grid Voltage"
+    id: dc_dc_grid_voltage
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->dc_dc_grid_voltage;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "DC-DC Grid Frequency"
+    id: dc_dc_grid_frequency
+    unit_of_measurement: Hz
+    accuracy_decimals: 2
+    icon: "mdi:sine-wave"
+    device_class: frequency
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->dc_dc_grid_frequency;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Isolation Resistance"
+    id: isolation_resistance
+    unit_of_measurement: "MΩ"
+    accuracy_decimals: 2
+    icon: "mdi:resistor"
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->isolation_resistance;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "DC-DC V Bulk"
+    id: dc_dc_v_bulk
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->dc_dc_v_bulk;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Average Grid Voltage"
+    id: average_grid_voltage
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_grid
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->average_grid_voltage;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Bulk Mid Voltage"
+    id: v_bulk_mid
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_dc
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->v_bulk_mid;
+
+  - platform: template
+    update_interval: *default_sensor
+    name: "Grid Voltage Neutral"
+    id: grid_voltage_neutral
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    icon: "mdi:flash"
+    device_class: voltage
+    state_class: measurement
+    web_server:
+      sorting_group_id: sg_grid
+    lambda: |-
+      if (InverterMonitor::get_instance()->still_booting()) return {};
+      return InverterMonitor::get_instance()->grid_voltage_neutral;
+
+text_sensor:
+  - platform: template
+    update_interval: *default_sensor
+    name: "Connection Status"
+    id: connection_status
+    icon: "mdi:connection"
+    web_server:
+      sorting_group_id: sg_general
+    lambda: |-
+      return InverterMonitor::get_instance()->connection_status->state;

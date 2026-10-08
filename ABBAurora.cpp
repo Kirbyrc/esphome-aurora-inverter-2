@@ -369,7 +369,7 @@ bool ABBAurora::ReadCumulatedEnergy(CUMULATED_ENERGY_TYPE par)
 
 bool ABBAurora::WriteBaudRateSetting(byte baudcode)
 {
-    if ((int)baudcode >= 0 && (int)baudcode <= 3)
+    if (baudcode <= 3)
     {
         return Send(this->Address, (byte)85, baudcode, (byte)0, (byte)0, (byte)0, (byte)0, (byte)0);
     }

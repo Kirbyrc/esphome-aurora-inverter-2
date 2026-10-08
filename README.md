@@ -2,9 +2,19 @@
 
 ESPHome integration that monitors an ABB/Power-One Aurora **PVI-5000-6000-OUTD-US** solar inverter over its RS-485 port and exposes live telemetry (voltages, currents, power, temperatures, cumulated energy, grid readings) to Home Assistant.
 
-Config: [`inverter.yaml`](../inverter.yaml)
+Config package: [`inverter.yaml`](inverter.yaml)
 Library code: [`aurora_inverter/`](.)
 Repository: [github.com/Kirbyrc/esphome](https://github.com/Kirbyrc/esphome)
+
+## Usage
+
+Everything for this project lives in this folder. The ESPHome dashboard only lists YAML files in the top level of the config directory, so the folder is pulled in as a [package](https://esphome.io/components/packages/) from a small top-level device config:
+
+1. Copy this folder into your ESPHome config directory as `aurora_inverter/`. The folder name matters: the `esphome: includes:` paths in [`inverter.yaml`](inverter.yaml) are resolved relative to the config directory, not to the package file.
+2. Copy [`example_inverter.yaml`](example_inverter.yaml) up into the config directory (next to the folder, not inside it) and rename it, e.g. `inverter.yaml`. It is a complete device config: WiFi with a fallback hotspot, the Home Assistant API, encrypted OTA updates, and a login for the web page.
+3. Add the entries from [`secrets.yaml.example`](secrets.yaml.example) to your `secrets.yaml` and fill in real values.
+
+The package ([`inverter.yaml`](inverter.yaml)) supplies the board (`esp32:`), logger level, web server (version 3 with sorting groups), polling interval, and all inverter sensors. The device then shows up in Home Assistant through the API and serves its own web page on port 80.
 
 ## Credit
 
@@ -118,20 +128,24 @@ The local ESPHome web page (`inverter.local`) organizes sensors into custom grou
 2. **DC** — PV string voltage/current/power, bulk voltage fields.
 3. **Grid** — grid voltage/current/power/frequency.
 
-The **Diagnostic** entities (IP address, WiFi strength, uptime, ESPHome version, reset reason, reboot button — defined in the shared `common_interface.yaml`) render *before* these three groups rather than after, because any page with custom sorting groups causes ungrouped entities to render first; this is a cosmetic ordering quirk, not a functional issue.
+The **Diagnostic** entities (IP address, WiFi strength, uptime, ESPHome version, reset reason, reboot button — whatever your top-level config adds outside this package) render *before* these three groups rather than after, because any page with custom sorting groups causes ungrouped entities to render first; this is a cosmetic ordering quirk, not a functional issue.
 
 ## Reliability Features
 
 - **Overnight handling:** the inverter powers itself down at night. `ReadState()` will fail continuously for hours; this is normal, not a fault. `connection_status` reports `DISCONNECTED` and clears automatically on the next real success at sunrise.
 - **UART lockup detection & self-heal:** if `ReadState()` fails **10 cycles in a row** (~2.5 minutes at the current 15s interval), `InverterMonitor` assumes the ESP32's UART driver may be wedged (as opposed to the inverter simply being offline) and calls `ABBAurora::reset_serial()`, which calls `serial->end()`, waits `delay(100)` before reinitializing, then calls `serial->begin()` and restores the 100ms `readBytes()` timeout. This logs a `WARNING` (`INVERTER_MONITOR` and `ABB_AURORA` tags) at each step of the teardown/reinit — so a crash occurring mid-reset can be pinpointed by which step was last logged — and only fires **once per outage**; it does not keep resetting every 2.5 minutes through a multi-hour overnight outage, since the counter re-arms on the next real success.
 - **`Serial Reset Count` sensor** — a persistent counter (General group) tracking how many times the self-heal reset has fired since boot.
-- **`Reset Reason` sensor** (from `common_interface.yaml`, applies to every device) — reports the ESP32's actual last reset cause (OTA reboot, task watchdog, brownout, power-on, etc.), useful for telling a deliberate reflash apart from a crash.
+- **`Reset Reason` sensor** (optional, not part of the package) — reports the ESP32's actual last reset cause (OTA reboot, task watchdog, brownout, power-on, etc.), useful for telling a deliberate reflash apart from a crash. To add it, put this in your top-level config:
 
-## Stability
+  ```yaml
+  debug:
 
-Earlier builds of this integration crashed intermittently (`exception/panic`, `task watchdog` — visible via the shared `Reset Reason` sensor) with no conclusively identified root cause. Several theories were investigated and either ruled out or left unproven: a `reset_serial()` teardown race, and a batch-write-to-a-stale-API-connection theory. Both delay-based and timeout-based tweaks to the RS-485 read path were tried and measured to have no effect on read reliability (see Known Limitations) — none of them were ever confirmed to be crash-related either.
-
-The current build — the two-group read split, corrected temperature calculation, RX-buffer drain fix, a defensive null-check on the `inverter` pointer, the `Sensor*`→`float` raw-value refactor, and the boot-time `NAN`/hold-off fix — has run continuously with **zero unexplained reboots for ~43 hours** as of 2026-08-26 (every reboot in the full capture log traces to a deliberate OTA flash or a manual restart-button press). This is an encouraging data point, not confirmation the underlying crash cause is fixed, since it was never conclusively identified — worth continuing to watch rather than treating as resolved.
+  text_sensor:
+    - platform: debug
+      reset_reason:
+        name: "Reset Reason"
+        entity_category: diagnostic
+  ```
 
 ## Boot-Time Data Handling
 
@@ -162,4 +176,4 @@ Note: enabling this adds real per-call overhead (string formatting + network log
 
 - Only a fraction of the Aurora protocol's DSP value types are supported by this inverter model — fields specific to 3-phase central inverters (phase R/S/T), fans, and wind-converter models were removed from `InverterMonitor.h`/`inverter.yaml` since the PVI-5000-6000-OUTD-US never responds to them.
 - `V_BULK_POSITIVE`/`V_BULK_NEGATIVE` and `Panel Micro Voltage` were removed — they consistently read `0.0` on this model (a valid response, just an unpopulated field, not a communication failure).
-- A residual ~10-15% per-read failure rate remains even with proper 120Ω termination in place. Failed reads are consistently truncated (a clean prefix of real bytes followed by silence, running out the full 100ms per-byte timeout), never scattered mid-frame corruption. Several fixes targeting *our* side of the exchange were tried and measured to have no benefit: a settling delay on RX-enable (tested at both 2ms and 20ms), a longer overall `readBytes()` timeout (150ms), and draining stale bytes from the RX buffer before each transmit (confirmed to find nothing to drain). The consistent "good prefix, then silence" shape points at the loss happening during the *inverter's own* transmission — its half-duplex driver-disable timing or EMI from its switching electronics — which isn't addressable from the ESP32 side.
+- A residual ~10-15% per-read failure rate remains even with proper 120Ω termination in place. Failed reads are consistently truncated (a clean prefix of real bytes followed by silence, running out the full 100ms per-byte timeout), never scattered mid-frame corruption. Several fixes targeting *our* side of the exchange were tried and measured to have no benefit: a settling delay on RX-enable (tested at both 2ms and 20ms), a longer overall `readBytes()` timeout (150ms), and draining stale bytes from the RX buffer before each transmit (confirmed to find nothing to drain). The consistent "good prefix, then silence" shape points not at a random electrical fault but at a bug in the inverter firmware, which isn't addressable from the ESP32 side.
