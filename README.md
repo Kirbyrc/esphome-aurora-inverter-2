@@ -23,6 +23,24 @@ The RS-485/Aurora protocol library (`aurora_inverter/ABBAurora.*`, `aurora_inver
 
 These pins are owned directly by the Aurora library via raw `Serial2`/`digitalWrite` calls, not by ESPHome's `uart:`/`switch:` components — those are deliberately *not* declared in `inverter.yaml` to avoid double-claiming the same physical pins.
 
+### Installation Photos
+
+Inverter access panel:
+
+![Inverter access panel](implementation_pictures/IMG_5934.JPG)
+
+Network cable connected to the inverter's RS-485 port:
+
+![Network cable connected to the inverter](implementation_pictures/IMG_5962.JPG)
+
+Enclosure housing the monitoring electronics:
+
+![Monitoring electronics enclosure](implementation_pictures/IMG_6143.JPG)
+
+Basement installation:
+
+![Basement installation](implementation_pictures/IMG_6141.JPG)
+
 ## Software Architecture
 
 | File | Purpose |
