@@ -158,7 +158,7 @@ Walking through one full 15-second `update()` cycle, from the `interval:` trigge
 
    So of GPIO21's two transitions per transaction, only the TX-enable side (HIGH) carries a deliberate settling delay (`delay(40)`); the RX-enable side (LOW) currently has none.
 
-5. **After the group loop.** `power_in_total` is recomputed from the two power sensors' latest states, the group toggle flips so the *other* group gets read next cycle, and the status LED turns back off.
+5. **After the group loop.** `power_in_total` is recomputed from the two power sensors' latest states, and the group toggle flips so the *other* group gets read next cycle.
 
 **Measured timing:**
 - Successful 8/8-byte reads: ~21ms average, up to ~80ms.

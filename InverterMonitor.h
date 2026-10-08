@@ -7,14 +7,12 @@ using namespace text_sensor;
 using namespace sensor;
 
 #if defined(USE_ESP32)
-#define LED 2               //GPIO02, the ESP32 internal led
 #define RX 18               //GPIO18
 #define TX 17               //GPIO17
 #define TX_CONTROL_GPIO 21  //GPIO21
 #define INVERTER_MONITOR_SERIAL Serial2
 
 #elif defined(USE_ESP8266)
-#define LED LED_BUILTIN
 // On esp8266 UART0 *must* use GPIO (1, 3) OR GPIO (15, 13)
 // Alternate pins GPIO (15, 13) are not connected to USB-UART
 #define RX 13              // GPI13, D7, UART0 alt RX
@@ -166,7 +164,6 @@ public:
   void setup() override
   {
     ESP_LOGD(TAG, "Setting up");
-    pinMode(LED, OUTPUT);
     ABBAurora::setup(INVERTER_MONITOR_SERIAL, RX, TX, TX_CONTROL_GPIO);
     inverter = new ABBAurora(INVERTER_ADDRESS);
     connection_status->publish_state(DISCONNECTED);
@@ -225,7 +222,6 @@ public:
         connection = 1;
         connection_status->publish_state(CONNECTED);
       }
-      turn_led_on();
 
       // Only read/publish one of the two groups per cycle -- full refresh of
       // any given sensor takes two 15s cycles (30s) instead of one, matching
@@ -243,7 +239,6 @@ public:
       power_in_total = power_in_1 + power_in_2;
       group_toggle_ = !group_toggle_;
 
-      turn_led_off();
       ESP_LOGD(TAG, "update() end (success path)");
     }
     else
@@ -260,7 +255,7 @@ public:
 
       // Only reset once per outage -- if the inverter is simply powered down
       // (e.g. overnight), no amount of resetting our own serial port will
-      // help, so don't spend hours resetting every 50s. One attempt covers
+      // help, so don't spend hours resetting every ~2.5 min. One attempt covers
       // the case where it's actually a wedged UART driver; if the outage
       // continues past that, we just wait quietly for the next real success.
       if (consecutive_failures >= LOCKUP_THRESHOLD && !reset_attempted)
@@ -274,16 +269,6 @@ public:
       }
       ESP_LOGD(TAG, "update() end (failure path)");
     }
-  }
-
-  void turn_led_on()
-  {
-    digitalWrite(LED, HIGH);
-  }
-
-  void turn_led_off()
-  {
-    digitalWrite(LED, LOW);
   }
 };
 
