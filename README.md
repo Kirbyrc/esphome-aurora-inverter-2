@@ -1,4 +1,4 @@
-# Inverter Monitor
+# ESPHome Inverter Monitor
 
 ESPHome integration that monitors an ABB/Power-One Aurora **PVI-5000-6000-OUTD-US** solar inverter over its RS-485 port and exposes live telemetry (voltages, currents, power, temperatures, cumulated energy, grid readings) to Home Assistant.
 
