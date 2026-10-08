@@ -2,19 +2,64 @@
 
 ESPHome integration that monitors an ABB/Power-One Aurora **PVI-5000-6000-OUTD-US** solar inverter over its RS-485 port and exposes live telemetry (voltages, currents, power, temperatures, cumulated energy, grid readings) to Home Assistant.
 
-Config package: [`inverter.yaml`](inverter.yaml)
-Library code: [`aurora_inverter/`](.)
-Repository: [github.com/Kirbyrc/esphome-aurora-inverter-2](https://github.com/Kirbyrc/esphome-aurora-inverter-2)
+- **Repository:** [github.com/Kirbyrc/esphome-aurora-inverter-2](https://github.com/Kirbyrc/esphome-aurora-inverter-2)
+- **Config package:** [`inverter.yaml`](inverter.yaml)
+- **Example device config:** [`example_inverter.yaml`](example_inverter.yaml)
 
-## Usage
+## Build & Install
 
-Everything for this project lives in this folder. The ESPHome dashboard only lists YAML files in the top level of the config directory, so the folder is pulled in as a [package](https://esphome.io/components/packages/) from a small top-level device config:
+Everything for this project lives in this repository. The ESPHome dashboard only lists YAML files in the top level of its config directory, so this repository is pulled in as a [package](https://esphome.io/components/packages/) from a small top-level device config that you create.
 
-1. Copy this folder into your ESPHome config directory as `aurora_inverter/`. The folder name matters: the `esphome: includes:` paths in [`inverter.yaml`](inverter.yaml) are resolved relative to the config directory, not to the package file.
-2. Copy [`example_inverter.yaml`](example_inverter.yaml) up into the config directory (next to the folder, not inside it) and rename it, e.g. `inverter.yaml`. It is a complete device config: WiFi with a fallback hotspot, the Home Assistant API, encrypted OTA updates, and a login for the web page.
-3. Add the entries from [`secrets.yaml.example`](secrets.yaml.example) to your `secrets.yaml` and fill in real values.
+### 1. Get the code
 
-The package ([`inverter.yaml`](inverter.yaml)) supplies the board (`esp32:`), logger level, web server (version 3 with sorting groups), polling interval, and all inverter sensors. The device then shows up in Home Assistant through the API and serves its own web page on port 80.
+Clone the repository into your ESPHome config directory **as `aurora_inverter/`**:
+
+```bash
+cd /path/to/esphome/config        # the directory that holds your device YAML files and secrets.yaml
+git clone https://github.com/Kirbyrc/esphome-aurora-inverter-2 aurora_inverter
+```
+
+The folder name matters: the `esphome: includes:` paths in [`inverter.yaml`](inverter.yaml) are resolved relative to the config directory, not to the package file, so a clone under the default name (`esphome-aurora-inverter-2/`) will not build. If you download the ZIP instead, rename the extracted folder to `aurora_inverter`.
+
+### 2. Create the device config
+
+Copy [`example_inverter.yaml`](example_inverter.yaml) up into the config directory (next to the `aurora_inverter/` folder, not inside it) and rename it, e.g. `inverter.yaml`. It is a complete device config: WiFi with a fallback hotspot, the Home Assistant API, encrypted OTA updates, a login for the web page, and the package include. Change `name:`/`friendly_name:` if you want a different device name.
+
+The package ([`inverter.yaml`](inverter.yaml)) supplies the board (`esp32:`), logger level, web server (version 3 with sorting groups), polling interval, and all inverter sensors.
+
+### 3. Add the secrets
+
+Add the entries from [`secrets.yaml.example`](secrets.yaml.example) to your `secrets.yaml` and fill in real values. The API encryption key must be a 32-byte base64 string; the [ESPHome API docs](https://esphome.io/components/api/) page generates one. It is used both by Home Assistant and to encrypt OTA uploads.
+
+### 4. Wire the hardware
+
+- **Power:** the board's `DC 7-36V` terminals, fed here by a 12 V DIN-rail supply (Mean Well HDR-15-12) in the same enclosure. The board can also run from USB-C while you are setting it up.
+- **RS-485:** board `A+` → inverter T/R+, board `B-` → inverter T/R-. See [Hardware](#hardware) for the network-cable pinout, termination, and the GPIOs the firmware uses.
+
+### 5. First flash (USB)
+
+A new board has no ESPHome firmware yet, so the first install must be over USB:
+
+- **ESPHome dashboard:** open the new device, choose **Install → Plug into this computer**, and connect the board with a USB-C cable. (This uses Web Serial, which needs Chrome or Edge and a dashboard opened over HTTPS or on `localhost`. Otherwise choose **Manual download** and flash the factory image with [web.esphome.io](https://web.esphome.io).)
+- **Command line:** with the board connected, run `esphome run inverter.yaml` and pick the serial port.
+
+### 6. Later updates (WiFi)
+
+Once the device is on your network, updates go over the air: **Install → Wirelessly** in the dashboard, or `esphome run inverter.yaml` and pick the network address.
+
+### 7. Add it to Home Assistant
+
+Home Assistant normally discovers the device automatically (**Settings → Devices & services**). When it asks, enter the API encryption key from your `secrets.yaml`. The device also serves its own web page on port 80, protected by the username and password from `secrets.yaml`.
+
+### 8. Check it is working
+
+During daylight, when the inverter is producing power:
+
+- `Connection Status` should change to `CONNECTED` within about 30 seconds of boot.
+- Readings appear after the 1-minute boot hold-off (see [Boot-Time Data Handling](#boot-time-data-handling)).
+- `Serial Reset Count` should stay at `0`.
+
+At night the inverter powers itself down, so `DISCONNECTED` with no readings is normal (see [Reliability Features](#reliability-features)).
 
 ## Credit
 
