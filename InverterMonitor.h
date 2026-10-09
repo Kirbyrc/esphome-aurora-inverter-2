@@ -1,3 +1,10 @@
+// Editors (e.g. VS Code's C/C++ extension) may flag this include as an error
+// ("cannot open source file ... dependency of esphome.h"). That's expected:
+// esphome.h and its dependencies only exist inside the ESPHome build, which
+// the editor knows nothing about. The firmware builds fine. Removing the line
+// doesn't help -- the generated main.cpp includes esphome.h before this file,
+// so the build doesn't need it, but the editor then reports every ESPHome name
+// (PollingComponent, Sensor, ESP_LOGW, ...) as undefined instead.
 #include "esphome.h"
 #include <ABBAurora.h>
 #include <cmath>
